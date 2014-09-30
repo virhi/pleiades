@@ -25,10 +25,6 @@ then
     echo "source /home/vagrant/.bashrc_alias" >>/home/vagrant/.bashrc
 fi
 
-cd /vagrant
-
-sudo npm install express
-
 ## install mysql
 sudo debconf-set-selections <<< 'mysql-server mysql-server/root_password password root'
 sudo debconf-set-selections <<< 'mysql-server mysql-server/root_password_again password root'
@@ -37,3 +33,8 @@ sudo apt-get -y install mysql-server
 sudo apt-get -y install mysql-client
 
 mysql --user="root" --password="root" --database="pleiade" --execute="DROP DATABASE pleiade; CREATE DATABASE pleiade;"
+
+cd /vagrant
+
+sudo npm install express
+sudo npm install
