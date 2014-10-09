@@ -1,30 +1,27 @@
 var _                = require('underscore'),
     async            = require('async'),
+    utils            = require('./utils.js'),
     defaultMethods   = {
       //@TODO auto load methods
-      POST:       require('./defaultMethods/post.js'),
-      GET:        require('./defaultMethods/get.js'),
-      PUT:        require('./defaultMethods/put.js'),
-      DELETE:     require('./defaultMethods/delete.js'),
+      post:   require('./defaultMethods/post.js'),
+      get:    require('./defaultMethods/get.js'),
+      put:    require('./defaultMethods/put.js'),
+      delete: require('./defaultMethods/delete.js'),
     };
 
 var services = {
-  app         : {},
-  express     : {},
-  objects     : {},
-  connection  : {},
+  app     : {},
+  objects : {},
 
   /**
    * Constructor for services object
-   * @param  {object}   express     express instance
-   * @param  {object}   app         server instance
-   * @param  {object}   objects     list of service to implement, with callbacks
-   * @param  {object}   connection  MySQL instance
-   * @param  {Function} callback    action to perform after configuration
+   * @param  {object}   app      server instance
+   * @param  {object}   objects  list of service to implement, with callbacks
+   * @param  {Function} callback action to perform after configuration
    */
   configure : function(app, objects, callback) {
-    this.app         = app;
-    this.objects     = objects;
+    this.app     = app;
+    this.objects = objects;
 
     // ajoute le nom de l'objet dans les méthode qui le compose (utile pour la suite)
     _.each(this.objects, function(object, objectIndex, objectList) {
@@ -55,7 +52,7 @@ var services = {
   run : function (callback) {
     async.eachSeries(this.objects, this.addService, function(err) {
       if(err != undefined) {
-        console.log('Error, can\'t run webservices', err);
+        console.log('Error, can\'t run webservices'.error, err);
       }
       else {
         callback();
@@ -67,33 +64,107 @@ var services = {
   addService : function(object, callback) {
     var _self = services;
 
-    async.eachSeries(object.methods, _self.runMethod, function(err){
+    async.eachSeries(object.methods, _self.runMethod, function(err) {
       if(err != undefined) {
-        console.log('Une erreur est survenue lors du lancement du service ' + object.name, err);
+        var message = 'Une erreur est survenue lors du lancement du service ' + object.name;
+        console.log(message.error, err);
       }
       else {
-        console.log('Service ' + object.name + ' run successfully');
+        var message = 'Service ' + object.name + ' run successfully';
+        console.log(message.success);
         callback();
       }
     });
   },
 
+  preprocess: function(req, res, method, callback) {
+    if(utils.isset(method, 'preprocess')) {
+      async.eachSeries(
+        method.preprocess,
+        function(preprocess, next) {
+          if(typeof(preprocess) == 'function') {
+            preprocess(req, res, next);
+          }
+          else {
+            var message = method.objectName + " have bad preprocess (not a function).";
+            console.log(message.warn);
+            next();
+          }
+        },
+        function(err) {
+          if(err) {
+            console.log('Error : '.error, err);
+          }
+          else {
+            callback();
+          }
+        }
+      );
+    }
+    else {
+      callback();
+    }
+  },
+
+  process: function(req, res, method, callback) {
+    var self = this;
+
+    if(utils.isset(method, 'process')) {
+      if(typeof(method.process) == 'function') {
+        method.process(req, res, self, method, callback);
+      }
+      else {
+        var message = method.objectName + " have bad process (not a function).";
+        console.log(message.warn);
+        callback();
+      }
+    }
+    else if(utils.isset(defaultMethods, method.verb)) {
+      defaultMethods[method.verb](req, res, self, method, callback);
+    }
+    else {
+      var message = 'Error : ' + method.objectName + ' have a methode named ' + method.verb + ' but no function to run it.';
+      console.log(message.error);
+    }
+  },
+
+  callback: function(req, res, service, method, results) {
+    if(utils.isset(method, 'callback')) {
+      async.eachSeries(
+        method.callback,
+        function(callback, next) {
+          if(typeof(callback) == 'function') {
+            callback(req, res, service, method, results, next);
+          }
+          else {
+            var message = method.objectName + " have bad callback (not a function).";
+            console.log(message.warn);
+            next();
+          }
+        },
+        function(err) {
+          if(err) {
+            console.log('Error : '.error, err);
+          }
+        }
+      );
+    }
+  },
+
   // Run specific methode
   runMethod : function(method, callback) {
-    var _self = services;
+    var self = services;
 
-    // Call default method
-    if(!_.has(method, 'function') && _.has(defaultMethods, method.name)) {
-      defaultMethods[method.name](_self, method);
-    }
-    // Call overrided method
-    else if(_.has(method, 'process')) {
-      method.process(_self);
-    }
-    // No method found
-    else {
-      console.log('Error : ' + method.objectName + ' have a methode named ' + method.name + ' but no function to run it.');
-    }
+    self.app[method.verb]('/' + method.objectName, function (req, res) {
+      // Preprocess
+      self.preprocess(req, res, method, function() {
+        // Process
+        self.process(req, res, method, function(req, res, service, method, results) {
+          // Callback
+          self.callback(req, res, service, method, results);
+        });
+      });
+    });
 
     callback();
   },
